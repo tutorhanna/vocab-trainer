@@ -219,7 +219,36 @@
     padding: 12px; margin-bottom: 14px; }
   .deck-filter-item { display: flex; align-items: center; gap: 8px;
     padding: 6px 0; cursor: pointer; }
-  .deck-filter-item input { width: auto; margin: 0; cursor: pointer; }
+    .deck-filter-item input { width: auto; margin: 0; cursor: pointer; }
+
+  /* Баннеры напоминаний */
+  .reminder-banner {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    padding: 12px 18px;
+    border-radius: 10px;
+    margin-bottom: 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.08);
+  }
+  .reminder-warn { background: #fefcbf; color: #744210;
+    border-left: 4px solid #dd6b20; }
+  .reminder-urgent { background: #fed7d7; color: #742a2a;
+    border-left: 4px solid #e53e3e; }
+  .reminder-soft { background: #bee3f8; color: #2c5282;
+    border-left: 4px solid #3182ce; }
+  .reminder-banner button { margin: 0; padding: 6px 12px; font-size: 13px; }
+  .reminder-banner .close-btn {
+    background: transparent; color: inherit; font-size: 20px;
+    padding: 0 8px; font-weight: 400;
+  }
+  .reminder-banner .close-btn:hover { background: rgba(0,0,0,.05); }
 </style>
 </head>
 <body>
@@ -493,7 +522,7 @@
              onkeydown="if(event.key==='Enter'){checkListening();}">
       <div style="text-align:center">
         <button onclick="checkListening()">Проверить</button>
-        <button class="secondary" onclick="nextListeningWord()">⏭ Пропустить</button>
+               <button class="secondary" onclick="skipListeningWord()">⏭ Пропустить</button>
       </div>
       <div id="listeningFeedback" style="max-width:600px;margin:0 auto"></div>
     </div>
@@ -517,8 +546,8 @@
         🎲 Смешанный
       </label>
     </div>
-    <div class="quiz-progress" id="quizProgress"></div>
-    <    <div class="quiz-question">
+        <div class="quiz-progress" id="quizProgress"></div>
+    <div class="quiz-question">
       <div class="quiz-word" id="quizWord">—</div>
       <div class="hint" id="quizHint">Выберите правильный перевод</div>
     </div>
@@ -583,7 +612,9 @@
   <button class="danger" onclick="deleteStudent()">👤 Удалить ученика полностью</button>
 </div>
 
+<div id="reminderContainer"></div>
 <div id="modalOverlay" style="display:none"></div>
+
 
 <script>
 // ============================================================
@@ -650,6 +681,10 @@ let listeningCurrent = null;
 // Направление теста
 let quizDirection = 'fwd'; // 'fwd' | 'rev' | 'mix'
 
+// Напоминания об экспорте
+let lastExportTime = 0;      // дата последнего экспорта (мс)
+let wordsAddedSinceExport = 0; // сколько слов добавлено с последнего экспорта
+let reminderDismissedUntil = 0; // до какого времени скрыть напоминание
 // ============================================================
 // МОДАЛЬНЫЕ ОКНА
 // ============================================================
@@ -801,7 +836,13 @@ function loginStudent() {
 
   if (migrated || badDecks.length) persist();
 
-  localStorage.setItem('vocab_last_student', name);
+    localStorage.setItem('vocab_last_student', name);
+
+  // Загружаем данные о напоминаниях
+  lastExportTime = all[name].lastExportTime || 0;
+  wordsAddedSinceExport = all[name].wordsAddedSinceExport || 0;
+  reminderDismissedUntil = all[name].reminderDismissedUntil || 0;
+  renderReminder();
 
   trainDeckSelection = { '__all__': true };
   examDeckSelection = { '__all__': true };
@@ -830,6 +871,9 @@ function persist() {
   }
   all[currentStudent].words = words;
   all[currentStudent].decks = decks;
+  all[currentStudent].lastExportTime = lastExportTime;
+  all[currentStudent].wordsAddedSinceExport = wordsAddedSinceExport;
+  all[currentStudent].reminderDismissedUntil = reminderDismissedUntil;
   saveAll(all);
 }
 
@@ -1570,7 +1614,8 @@ function addWord() {
     created: Date.now(), nextReview: Date.now(),
     interval: 0, ease: 2.5, reps: 0, correct: 0, wrong: 0
   });
-  persist();
+    persist();
+  incrementWordsAdded(1);
 
   ['inWord','inTr','inEx','inSyn','inRel'].forEach(id => {
     const el = document.getElementById(id);
@@ -1713,7 +1758,8 @@ function importBulkJson() {
     added++;
   });
 
-  persist();
+    persist();
+  if (added > 0) incrementWordsAdded(added);
   if (status) status.textContent = `✅ Добавлено: ${added}` + (skipped ? ` · Пропущено: ${skipped}` : '');
   const ta = document.getElementById('bulkJson');
   if (ta) ta.value = '';
@@ -2290,6 +2336,23 @@ function playListeningWord() {
   if (listeningCurrent) speak(listeningCurrent.word);
 }
 
+function skipListeningWord() {
+  // Пропускаем слово БЕЗ зачёта в статистику
+  if (listeningIndex >= listeningQueue.length) {
+    nextListeningWord();
+    return;
+  }
+
+  const fbEl = document.getElementById('listeningFeedback');
+  if (fbEl && listeningCurrent) {
+    fbEl.className = 'feedback info';
+    fbEl.innerHTML = `⏭ Пропущено: <b>${esc(listeningCurrent.word)}</b> — ${esc(listeningCurrent.translation)}`;
+  }
+
+  listeningIndex++;
+  setTimeout(nextListeningWord, 800);
+}
+
 // Расстояние Левенштейна — сколько символов нужно изменить, чтобы одно стало другим
 function levenshtein(a, b) {
   if (a === b) return 0;
@@ -2692,8 +2755,7 @@ function showExamQuestion() {
   if (barEl) barEl.style.width = ((examIndex / examQueue.length) * 100) + '%';
   if (fbEl) fbEl.innerHTML = '';
 
-  const type = (examIndex % 3) + 1;
-  examCurrent._type = type;
+    const type = (examIndex % 3) + 1;
 
   if (!qEl) return;
 
@@ -2927,6 +2989,114 @@ function renderStats() {
 }
 
 // ============================================================
+// НАПОМИНАНИЯ ОБ ЭКСПОРТЕ
+// ============================================================
+function renderReminder() {
+  const container = document.getElementById('reminderContainer');
+  if (!container) return;
+  if (!currentStudent) { container.innerHTML = ''; return; }
+
+  // Скрыто ли напоминание до времени
+  const now = Date.now();
+  if (reminderDismissedUntil > now) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const daysSinceExport = lastExportTime
+    ? Math.floor((now - lastExportTime) / (24 * 3600 * 1000))
+    : null; // null = никогда не экспортировал
+
+  let html = '';
+  let type = '';
+
+  // Проверяем оба условия — берём более важное
+  if (daysSinceExport === null && words.length > 0) {
+    // Никогда не экспортировал, но есть слова
+    type = 'urgent';
+    html = `
+      <div class="reminder-banner reminder-urgent">
+        <div>
+          ⚠️ <b>Ты ещё ни разу не сохранял слова в файл!</b><br>
+          Если почистишь кэш — потеряешь все ${words.length} слов и весь прогресс.
+          Сохрани прямо сейчас — это займёт 5 секунд.
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="green" onclick="exportData()">💾 Сохранить сейчас</button>
+          <button class="secondary" onclick="dismissReminder(2)">Позже</button>
+        </div>
+      </div>`;
+  } else if (daysSinceExport !== null && daysSinceExport >= 7) {
+    type = 'urgent';
+    html = `
+      <div class="reminder-banner reminder-urgent">
+        <div>
+          🚨 <b>Прошло ${daysSinceExport} дней с последнего сохранения!</b><br>
+          Apple/Chrome могут удалить данные в любой момент. Сохрани файл.
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="green" onclick="exportData()">💾 Сохранить сейчас</button>
+          <button class="secondary" onclick="dismissReminder(1)">Скрыть на день</button>
+        </div>
+      </div>`;
+  } else if (daysSinceExport !== null && daysSinceExport >= 5) {
+    type = 'warn';
+    html = `
+      <div class="reminder-banner reminder-warn">
+        <div>
+          📅 Прошло ${daysSinceExport} дней с последнего сохранения.
+          Лучше сохранить файл — 30 секунд, а прогресс не потеряется.
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="green" onclick="exportData()">💾 Сохранить</button>
+          <button class="secondary" onclick="dismissReminder(1)">Позже</button>
+        </div>
+      </div>`;
+  } else if (wordsAddedSinceExport >= 5) {
+    type = 'warn';
+    html = `
+      <div class="reminder-banner reminder-warn">
+        <div>
+          ➕ С последнего сохранения добавлено <b>${wordsAddedSinceExport} слов</b>.<br>
+          Если данные удалятся — эти слова придётся вводить заново.
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="green" onclick="exportData()">💾 Сохранить файл</button>
+          <button class="secondary" onclick="dismissReminder(1)">Позже</button>
+        </div>
+      </div>`;
+  } else if (wordsAddedSinceExport >= 1) {
+    type = 'soft';
+    html = `
+      <div class="reminder-banner reminder-soft">
+        <div>
+          💡 Ты добавил(а) <b>${wordsAddedSinceExport} новых слов</b>
+          с последнего сохранения. Лучше сразу сохранить файл.
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="green" onclick="exportData()">💾 Сохранить файл</button>
+          <button class="secondary" onclick="dismissReminder(1)">Позже</button>
+        </div>
+      </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
+function dismissReminder(days) {
+  reminderDismissedUntil = Date.now() + days * 24 * 3600 * 1000;
+  persist();
+  renderReminder();
+}
+
+// Счётчик добавленных слов (вызывается при добавлении слова/партии)
+function incrementWordsAdded(count) {
+  wordsAddedSinceExport += count;
+  persist();
+  renderReminder();
+}
+
+// ============================================================
 // ЭКСПОРТ / ИМПОРТ
 // ============================================================
 function exportData() {
@@ -2947,6 +3117,17 @@ function exportData() {
   a.download = `vocab_${currentStudent}_${date}.json`;
   a.click();
   URL.revokeObjectURL(url);
+
+  // Обнуляем счётчики напоминаний
+  lastExportTime = Date.now();
+  wordsAddedSinceExport = 0;
+  reminderDismissedUntil = 0;
+  persist();
+  renderReminder();
+
+  modalAlert('✅ Сохранено',
+    `Файл <b>vocab_${esc(currentStudent)}_${date}.json</b> скачан.<br><br>
+     Скинь его в Telegram «Избранное» или облако, чтобы не потерять.`);
 }
 
 function importData(event) {
