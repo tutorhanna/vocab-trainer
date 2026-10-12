@@ -290,14 +290,31 @@
     <button class="mode-btn" id="addModeBtn-bulk" onclick="setAddMode('bulk')">📋 Списком (или через ИИ)</button>
   </div>
 
-  <div id="add-single" style="display:block">
-    <label>Слово или фраза (англ.)</label>
+    <div id="add-single" style="display:block">
+
+    <label>Направление ввода</label>
+    <div class="row" style="margin-bottom:14px">
+      <label style="margin:0;display:flex;align-items:center;gap:6px;
+        padding:8px 14px;background:#e2e8f0;border-radius:8px;cursor:pointer">
+        <input type="radio" name="addDir" value="en" checked onchange="changeAddDir()"
+               style="width:auto;margin:0">
+        🇬🇧 Английский → 🇷🇺 Русский
+      </label>
+      <label style="margin:0;display:flex;align-items:center;gap:6px;
+        padding:8px 14px;background:#e2e8f0;border-radius:8px;cursor:pointer">
+        <input type="radio" name="addDir" value="ru" onchange="changeAddDir()"
+               style="width:auto;margin:0">
+        🇷🇺 Русский → 🇬🇧 Английский
+      </label>
+    </div>
+
+    <label id="inWordLabel">Слово или фраза (англ.)</label>
     <div class="row">
       <input id="inWord" placeholder="например: take care of" style="flex:1">
       <button class="secondary" onclick="autoFill()">🔍 Найти перевод</button>
     </div>
 
-    <label>Перевод (рус.)</label>
+    <label id="inTrLabel">Перевод (рус.)</label>
     <input id="inTr" placeholder="заполнится автоматически или введите вручную">
 
     <label>Примеры употребления (по одному в строке)</label>
@@ -308,7 +325,6 @@
 
     <label>🔗 Похожие по смыслу слова</label>
     <input id="inRel" placeholder="например: nurse, protect, watch">
-
     <div style="background:#f0f9ff;border:2px solid #3182ce;border-radius:8px;
          padding:14px;margin-bottom:12px">
       <label style="margin-bottom:8px;font-size:14px;color:#2c5282">
@@ -685,6 +701,9 @@ let quizDirection = 'fwd'; // 'fwd' | 'rev' | 'mix'
 let lastExportTime = 0;      // дата последнего экспорта (мс)
 let wordsAddedSinceExport = 0; // сколько слов добавлено с последнего экспорта
 let reminderDismissedUntil = 0; // до какого времени скрыть напоминание
+
+// Направление ввода при добавлении
+let addDirection = 'en'; // 'en' = вводим английское, 'ru' = вводим русское
 // ============================================================
 // МОДАЛЬНЫЕ ОКНА
 // ============================================================
@@ -1559,6 +1578,31 @@ function startTrainInDeck(deckName) {
 }
 
 // ============================================================
+// ПЕРЕКЛЮЧАТЕЛЬ НАПРАВЛЕНИЯ ВВОДА
+// ============================================================
+function changeAddDir() {
+  const el = document.querySelector('input[name="addDir"]:checked');
+  addDirection = el ? el.value : 'en';
+
+  const wordLabel = document.getElementById('inWordLabel');
+  const trLabel = document.getElementById('inTrLabel');
+  const wordInput = document.getElementById('inWord');
+  const trInput = document.getElementById('inTr');
+
+  if (addDirection === 'ru') {
+    if (wordLabel) wordLabel.textContent = 'Слово или фраза (рус.)';
+    if (trLabel) trLabel.textContent = 'Перевод (англ.)';
+    if (wordInput) wordInput.placeholder = 'например: заботиться о';
+    if (trInput) trInput.placeholder = 'заполнится автоматически (англ.)';
+  } else {
+    if (wordLabel) wordLabel.textContent = 'Слово или фраза (англ.)';
+    if (trLabel) trLabel.textContent = 'Перевод (рус.)';
+    if (wordInput) wordInput.placeholder = 'например: take care of';
+    if (trInput) trInput.placeholder = 'заполнится автоматически или введите вручную';
+  }
+}
+
+// ============================================================
 // АВТОЗАПОЛНЕНИЕ
 // ============================================================
 async function autoFill() {
@@ -1569,20 +1613,23 @@ async function autoFill() {
   const status = document.getElementById('autoFillStatus');
   if (status) status.textContent = '⏳ Ищу перевод...';
 
+  // Направление перевода: en→ru или ru→en
+  const langpair = addDirection === 'ru' ? 'ru|en' : 'en|ru';
+
   try {
     const r = await fetch(
-      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=en|ru`
+      `https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=${langpair}`
     );
     const d = await r.json();
     if (d.responseData?.translatedText) {
       const tr = document.getElementById('inTr');
       if (tr) tr.value = d.responseData.translatedText;
-      if (status) status.textContent = '✅ Перевод получен.';
+      if (status) status.textContent = '✅ Перевод получен. Можно исправить вручную.';
     } else {
-      if (status) status.textContent = '⚠️ Перевод не найден.';
+      if (status) status.textContent = '⚠️ Перевод не найден. Введите вручную.';
     }
   } catch (e) {
-    if (status) status.textContent = '⚠️ Нет интернета.';
+    if (status) status.textContent = '⚠️ Нет интернета. Введите вручную.';
   }
 }
 
@@ -1592,8 +1639,8 @@ async function autoFill() {
 function addWord() {
   if (!currentStudent) { modalAlert('Ошибка', 'Сначала войдите'); return; }
 
-  const w = document.getElementById('inWord')?.value.trim() || '';
-  const t = document.getElementById('inTr')?.value.trim() || '';
+  let w = document.getElementById('inWord')?.value.trim() || '';
+  let t = document.getElementById('inTr')?.value.trim() || '';
   const ex = (document.getElementById('inEx')?.value || '')
     .split('\n').map(s => s.trim()).filter(Boolean);
   const syn = (document.getElementById('inSyn')?.value || '')
@@ -1603,18 +1650,50 @@ function addWord() {
   const deck = document.getElementById('inDeck')?.value || 'Общее';
 
   if (!w || !t) { modalAlert('Ошибка', 'Заполните слово и перевод'); return; }
-  if (words.some(x => x.word.toLowerCase() === w.toLowerCase())) {
-    modalAlert('Уже есть', `Слово «${esc(w)}» уже в словаре`);
+
+  // Если вводили на русском — меняем местами
+  // В словаре ВСЕГДА word = англ, translation = рус
+  if (addDirection === 'ru') {
+    const tmp = w;
+    w = t;   // англ. слово
+    t = tmp; // рус. перевод
+  }
+
+  // Проверка на дубликат по английскому слову
+  const existingByWord = words.find(x => x.word.toLowerCase() === w.toLowerCase());
+  if (existingByWord) {
+    modalAlert('Уже есть',
+      `Слово «<b>${esc(w)}</b>» уже в словаре (перевод: «${esc(existingByWord.translation)}»).`);
     return;
   }
 
+  // Проверка: может, русский перевод уже есть у другого слова
+  const existingByTranslation = words.find(x =>
+    x.translation.toLowerCase().trim() === t.toLowerCase().trim());
+
+  if (existingByTranslation) {
+    // Показываем подтверждение
+    modalConfirm('Похоже, уже есть',
+      `«${esc(t)}» уже добавлено как перевод слова «<b>${esc(existingByTranslation.word)}</b>».<br><br>
+       Добавить ещё раз как «<b>${esc(w)}</b>»?`,
+      () => {
+        saveNewWord(w, t, ex, deck, syn, rel);
+      });
+    return;
+  }
+
+  // Обычное сохранение
+  saveNewWord(w, t, ex, deck, syn, rel);
+}
+
+function saveNewWord(w, t, ex, deck, syn, rel) {
   words.push({
     word: w, translation: t, examples: ex, deck: deck,
     synonyms: syn, related: rel, favorite: false,
     created: Date.now(), nextReview: Date.now(),
     interval: 0, ease: 2.5, reps: 0, correct: 0, wrong: 0
   });
-    persist();
+  persist();
   incrementWordsAdded(1);
 
   ['inWord','inTr','inEx','inSyn','inRel'].forEach(id => {
@@ -1625,7 +1704,7 @@ function addWord() {
   if (st) st.textContent = '';
 
   modalAlert('✅ Добавлено',
-    `Слово «<b>${esc(w)}</b>» добавлено в «<b>${esc(deck)}</b>».`);
+    `Слово «<b>${esc(w)}</b>» (${esc(t)}) добавлено в «<b>${esc(deck)}</b>».`);
 
   refreshActiveTab();
   switchTab('dict');
