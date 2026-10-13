@@ -1,7 +1,7 @@
 // Service Worker для Vocabulary Trainer Pro
 // Кэширует главную страницу, чтобы приложение работало офлайн
 
-const CACHE_NAME = 'vocab-trainer-v3';
+const CACHE_NAME = 'vocab-trainer-v4';
 const URLS_TO_CACHE = [
   './',
   './index.html',
