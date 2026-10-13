@@ -2033,29 +2033,98 @@ function removeWord(i) {
 
 function editWord(i) {
   const w = words[i];
-  modalPrompt(`Слово (было: ${w.word})`, w.word, (newWord) => {
-    modalPrompt(`Перевод (было: ${w.translation})`, w.translation, (newTr) => {
-      const deckList = decks.filter(d => d.name).map(d => d.name).join(', ');
-      modalPrompt(`Колода (есть: ${deckList})`, w.deck || 'Общее', (newDeck) => {
-        words[i].word = newWord.trim() || w.word;
-        words[i].translation = newTr.trim() || w.translation;
-        if (newDeck.trim()) {
-          if (!decks.some(d => d.name === newDeck.trim())) {
-            decks.push({
-              name: newDeck.trim(),
-              color: DECK_COLORS[decks.length % DECK_COLORS.length]
-            });
-          }
-          words[i].deck = newDeck.trim();
-        }
-        persist();
-        refreshDeckSelectors();
-        render();
-      });
-    });
-  });
-}
 
+  // Подготовим список колод для выпадающего списка
+  const deckOptions = decks
+    .filter(d => d && d.name)
+    .map(d => `<option value="${escAttr(d.name)}" ${d.name === (w.deck || 'Общее') ? 'selected' : ''}>${esc(d.name)}</option>`)
+    .join('');
+
+  // Модалка редактирования — как при создании слова
+  showModal(`
+    <h3>✏️ Редактировать слово</h3>
+
+    <label>Слово или фраза (англ.)</label>
+    <input id="editWordWord" value="${escAttr(w.word)}"
+      placeholder="например: take care of">
+
+    <label>Перевод (рус.)</label>
+    <input id="editWordTr" value="${escAttr(w.translation)}"
+      placeholder="например: заботиться о">
+
+    <label>Примеры употребления (по одному в строке)</label>
+    <textarea id="editWordEx" placeholder="I take care of my dog every day."
+      >${esc((w.examples || []).join('\n'))}</textarea>
+
+    <label>💡 Синонимы (через запятую)</label>
+    <input id="editWordSyn" value="${escAttr((w.synonyms || []).join(', '))}"
+      placeholder="например: look after, care for">
+
+    <label>🔗 Похожие по смыслу слова</label>
+    <input id="editWordRel" value="${escAttr((w.related || []).join(', '))}"
+      placeholder="например: nurse, protect, watch">
+
+    <label>📁 Колода</label>
+    <select id="editWordDeck">${deckOptions}</select>
+
+    <div class="modal-actions">
+      <button class="secondary" onclick="closeModal()">Отмена</button>
+      <button class="green" id="editWordSaveBtn">Сохранить</button>
+    </div>
+  `);
+
+  // Обработчик сохранения
+  const btn = document.getElementById('editWordSaveBtn');
+  if (btn) btn.onclick = () => {
+    const newWord = document.getElementById('editWordWord')?.value.trim() || '';
+    const newTr = document.getElementById('editWordTr')?.value.trim() || '';
+    const newEx = (document.getElementById('editWordEx')?.value || '')
+      .split('\n').map(s => s.trim()).filter(Boolean);
+    const newSyn = (document.getElementById('editWordSyn')?.value || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const newRel = (document.getElementById('editWordRel')?.value || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const newDeck = document.getElementById('editWordDeck')?.value || 'Общее';
+
+    if (!newWord || !newTr) {
+      modalAlert('Ошибка', 'Слово и перевод не могут быть пустыми');
+      return;
+    }
+
+    // Проверка на дубликат английского слова (если меняли)
+    if (newWord.toLowerCase() !== w.word.toLowerCase()) {
+      const dup = words.find((x, idx) =>
+        idx !== i && x.word.toLowerCase() === newWord.toLowerCase());
+      if (dup) {
+        modalAlert('Уже есть',
+          `Слово «<b>${esc(newWord)}</b>» уже есть в словаре (перевод: «${esc(dup.translation)}»).`);
+        return;
+      }
+    }
+
+    // Применяем
+    words[i].word = newWord;
+    words[i].translation = newTr;
+    words[i].examples = newEx;
+    words[i].synonyms = newSyn;
+    words[i].related = newRel;
+    words[i].deck = newDeck;
+
+    // Если новой колоды ещё нет — создаём
+    if (!decks.some(d => d.name === newDeck)) {
+      decks.push({
+        name: newDeck,
+        color: DECK_COLORS[decks.length % DECK_COLORS.length]
+      });
+      refreshDeckSelectors();
+    }
+
+    persist();
+    closeModal();
+    render();
+    modalAlert('✅ Сохранено', 'Слово обновлено.');
+  };
+}
 // ============================================================
 // ESC
 // ============================================================
